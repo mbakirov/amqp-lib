@@ -11,6 +11,8 @@ use Enqueue\AmqpTools\RabbitMqDlxDelayStrategy;
 use Interop\Amqp\AmqpConnectionFactory as InteropAmqpConnectionFactory;
 use Interop\Queue\Context;
 use PhpAmqpLib\Connection\AbstractConnection;
+use PhpAmqpLib\Connection\AMQPConnectionConfig;
+use PhpAmqpLib\Connection\AMQPConnectionFactory as PhpAmqpLibConnectionFactory;
 use PhpAmqpLib\Connection\AMQPLazyConnection;
 use PhpAmqpLib\Connection\AMQPLazySocketConnection;
 use PhpAmqpLib\Connection\AMQPSocketConnection;
@@ -32,9 +34,9 @@ class AmqpConnectionFactory implements InteropAmqpConnectionFactory, DelayStrate
     private $connection;
 
     /**
+     * @param array|string|null $config
      * @see ConnectionConfig for possible config formats and values.
      *
-     * @param array|string|null $config
      */
     public function __construct($config = 'amqp:')
     {
@@ -49,8 +51,7 @@ class AmqpConnectionFactory implements InteropAmqpConnectionFactory, DelayStrate
             ->addDefaultOption('keepalive', false)
             ->addDefaultOption('channel_rpc_timeout', 0.)
             ->addDefaultOption('heartbeat_on_tick', true)
-            ->parse()
-        ;
+            ->parse();
 
         if (in_array('rabbitmq', $this->config->getSchemeExtensions(), true)) {
             $this->setDelayStrategy(new RabbitMqDlxDelayStrategy());
@@ -73,119 +74,55 @@ class AmqpConnectionFactory implements InteropAmqpConnectionFactory, DelayStrate
         return $this->config;
     }
 
+    public function getAmqpConnectionConfig(): AMQPConnectionConfig
+    {
+        $config = new AMQPConnectionConfig();
+        $config->setHost($this->config->getHost());
+        $config->setPort($this->config->getPort());
+        $config->setUser($this->config->getUser());
+        $config->setPassword($this->config->getPass());
+        $config->setVhost($this->config->getVHost());
+
+        if ($this->config->isSslOn()) {
+            $config->setIsSecure(true);
+            $config->setSslCaPath($this->config->getSslCaCert());
+            $config->setSslCert($this->config->getSslCert());
+            $config->setSslKey($this->config->getSslKey());
+            $config->setSslVerify($this->config->isSslVerify());
+            $config->setSslVerifyName($this->config->isSslVerify());
+            $config->setSslPassPhrase($this->config->getSslPassPhrase());
+            $config->setSslCiphers($this->config->getOption('ciphers', ''));
+        }
+
+        $config->setInsist($this->config->getOption('insist'));
+        $config->setLoginMethod($this->config->getOption('login_method'));
+
+        if ($this->config->getOption('login_response')) {
+            $config->setLoginResponse($this->config->getOption('login_response'));
+        }
+
+        $config->setLocale($this->config->getOption('locale'));
+        $config->setConnectionTimeout($this->config->getConnectionTimeout());
+        $config->setChannelRPCTimeout($this->config->getOption('channel_rpc_timeout'));
+        $config->setReadTimeout((int)$this->config->getReadTimeout());
+        $config->setWriteTimeout((int)$this->config->getWriteTimeout());
+        $config->setKeepalive($this->config->getOption('keepalive'));
+        $config->setHeartbeat((int)round($this->config->getHeartbeat()));
+        $config->setIsLazy($this->config->isLazy());
+
+        $config->setIoType(
+            $this->config->getOption('stream') ?
+                AMQPConnectionConfig::IO_TYPE_STREAM :
+                AMQPConnectionConfig::IO_TYPE_SOCKET
+        );
+
+        return $config;
+    }
+
     private function establishConnection(): AbstractConnection
     {
         if (false == $this->connection) {
-            if ($this->config->getOption('stream')) {
-                if ($this->config->isSslOn()) {
-                    $sslOptions = array_filter([
-                        'cafile' => $this->config->getSslCaCert(),
-                        'local_cert' => $this->config->getSslCert(),
-                        'local_pk' => $this->config->getSslKey(),
-                        'verify_peer' => $this->config->isSslVerify(),
-                        'verify_peer_name' => $this->config->isSslVerify(),
-                        'passphrase' => $this->getConfig()->getSslPassPhrase(),
-                        'ciphers' => $this->config->getOption('ciphers', ''),
-                    ], function ($value) { return '' !== $value; });
-
-                    $con = new AMQPSSLConnection(
-                        $this->config->getHost(),
-                        $this->config->getPort(),
-                        $this->config->getUser(),
-                        $this->config->getPass(),
-                        $this->config->getVHost(),
-                        $sslOptions,
-                        [
-                            'insist' => $this->config->getOption('insist'),
-                            'login_method' => $this->config->getOption('login_method'),
-                            'login_response' => $this->config->getOption('login_response'),
-                            'locale' => $this->config->getOption('locale'),
-                            'connection_timeout' => $this->config->getConnectionTimeout(),
-                            'read_write_timeout' => (int) round(min($this->config->getReadTimeout(), $this->config->getWriteTimeout())),
-                            'keepalive' => $this->config->getOption('keepalive'),
-                            'heartbeat' => (int) round($this->config->getHeartbeat()),
-                        ]
-                    );
-                } elseif ($this->config->isLazy()) {
-                    $con = new AMQPLazyConnection(
-                        $this->config->getHost(),
-                        $this->config->getPort(),
-                        $this->config->getUser(),
-                        $this->config->getPass(),
-                        $this->config->getVHost(),
-                        $this->config->getOption('insist'),
-                        $this->config->getOption('login_method'),
-                        $this->config->getOption('login_response'),
-                        $this->config->getOption('locale'),
-                        $this->config->getConnectionTimeout(),
-                        (int) round(min($this->config->getReadTimeout(), $this->config->getWriteTimeout())),
-                        null,
-                        $this->config->getOption('keepalive'),
-                        (int) round($this->config->getHeartbeat()),
-                        $this->config->getOption('channel_rpc_timeout')
-                    );
-                } else {
-                    $con = new AMQPStreamConnection(
-                        $this->config->getHost(),
-                        $this->config->getPort(),
-                        $this->config->getUser(),
-                        $this->config->getPass(),
-                        $this->config->getVHost(),
-                        $this->config->getOption('insist'),
-                        $this->config->getOption('login_method'),
-                        $this->config->getOption('login_response'),
-                        $this->config->getOption('locale'),
-                        $this->config->getConnectionTimeout(),
-                        (int) round(min($this->config->getReadTimeout(), $this->config->getWriteTimeout())),
-                        null,
-                        $this->config->getOption('keepalive'),
-                        (int) round($this->config->getHeartbeat()),
-                        $this->config->getOption('channel_rpc_timeout')
-                    );
-                }
-            } else {
-                if ($this->config->isSslOn()) {
-                    throw new \LogicException('The socket connection implementation does not support ssl connections.');
-                }
-
-                if ($this->config->isLazy()) {
-                    $con = new AMQPLazySocketConnection(
-                        $this->config->getHost(),
-                        $this->config->getPort(),
-                        $this->config->getUser(),
-                        $this->config->getPass(),
-                        $this->config->getVHost(),
-                        $this->config->getOption('insist'),
-                        $this->config->getOption('login_method'),
-                        $this->config->getOption('login_response'),
-                        $this->config->getOption('locale'),
-                        (int) round($this->config->getReadTimeout()),
-                        $this->config->getOption('keepalive'),
-                        (int) round($this->config->getWriteTimeout()),
-                        (int) round($this->config->getHeartbeat()),
-                        $this->config->getOption('channel_rpc_timeout')
-                    );
-                } else {
-                    $con = new AMQPSocketConnection(
-                        $this->config->getHost(),
-                        $this->config->getPort(),
-                        $this->config->getUser(),
-                        $this->config->getPass(),
-                        $this->config->getVHost(),
-                        $this->config->getOption('insist'),
-                        $this->config->getOption('login_method'),
-                        $this->config->getOption('login_response'),
-                        $this->config->getOption('locale'),
-                        (int) round($this->config->getReadTimeout()),
-                        $this->config->getOption('keepalive'),
-                        (int) round($this->config->getWriteTimeout()),
-                        (int) round($this->config->getHeartbeat()),
-                        $this->config->getOption('channel_rpc_timeout')
-                    );
-                }
-            }
-
-            $this->connection = $con;
+            $this->connection = PhpAmqpLibConnectionFactory::create($this->getAmqpConnectionConfig());
         }
 
         return $this->connection;
