@@ -85,13 +85,21 @@ class AmqpConnectionFactory implements InteropAmqpConnectionFactory, DelayStrate
 
         if ($this->config->isSslOn()) {
             $config->setIsSecure(true);
-            $config->setSslCaPath($this->config->getSslCaCert());
-            $config->setSslCert($this->config->getSslCert());
-            $config->setSslKey($this->config->getSslKey());
-            $config->setSslVerify($this->config->isSslVerify());
-            $config->setSslVerifyName($this->config->isSslVerify());
-            $config->setSslPassPhrase($this->config->getSslPassPhrase());
-            $config->setSslCiphers($this->config->getOption('ciphers', ''));
+
+            $sslOptions = array_filter([
+                'CaCert' => $this->config->getSslCaCert(),
+                'Cert' => $this->config->getSslCert(),
+                'Key' => $this->config->getSslKey(),
+                'Verify' => $this->config->isSslVerify(),
+                'VerifyName' => $this->config->isSslVerify(),
+                'PassPhrase' => $this->getConfig()->getSslPassPhrase(),
+                'Ciphers' => $this->config->getOption('ciphers', ''),
+            ], function ($value) { return '' !== $value; });
+
+            foreach ($sslOptions as $key => $value) {
+                $method = 'setSsl' . $key;
+                $config->{$method}($value);
+            }
         }
 
         $config->setInsist($this->config->getOption('insist'));
